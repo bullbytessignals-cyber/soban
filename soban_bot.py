@@ -61,7 +61,9 @@ PREMIUM_PACKAGES: dict[int, tuple[float, float, str]] = {
     2222222222222222222: (10.0, 4.0, "CRYPTO BOT 👑"),   # <-- CRYPTO BOT role ID yahan daalo
 }
 
-# Affiliate panel image — apni marzi ki image URL yahan daalo
+# Affiliate panel image — apni image ka direct URL yahan daalo
+# Imgur aksar Discord mein block hota hai — prefer karo Discord pe khud upload karke URL lo
+# Ya koi bhi direct .png / .jpg / .gif link use karo
 AFFILIATE_BANNER_URL = "https://i.imgur.com/4M34hi2.png"
 
 DB_FILE          = 'bot_data.db'
@@ -363,7 +365,7 @@ class AffiliateButtons(discord.ui.View):
         return True
 
     @discord.ui.button(
-        label="Start Affiliate Program",
+        label="Start Earning",
         style=discord.ButtonStyle.green,
         emoji="🚀",
         custom_id="affiliate:start",
@@ -681,7 +683,9 @@ class SobanBot(commands.AutoShardedBot):
                     ),
                     color=discord.Color.dark_green(),
                 )
-                embed.set_image(url=AFFILIATE_BANNER_URL)
+                if AFFILIATE_BANNER_URL:
+                    embed.set_image(url=AFFILIATE_BANNER_URL)
+                    embed.set_thumbnail(url=AFFILIATE_BANNER_URL)
                 embed.set_footer(text="No limits — invite more, earn more! 🚀")
                 await safe_api_call(ch.send(embed=embed, view=AffiliateButtons()))
                 logger.info(f"[BOT] Affiliate panel posted in #{ch.name}")
@@ -968,6 +972,45 @@ async def checkchannel(ctx: commands.Context) -> None:
         "Click **📊 My Dashboard** in the affiliate panel to see your stats!",
         delete_after=15,
     )
+
+
+@bot.command()
+async def announce(ctx: commands.Context, *, message: str) -> None:
+    """Admin only — DM send karta hai saare members ko (rate-limited, slow)"""
+    if ctx.guild.id != GUILD_ID:
+        return
+    if not is_admin(ctx.author, ctx.guild):
+        await ctx.send("❌ No permission!")
+        return
+    if ctx.channel.id != LOG_CHANNEL_ID:
+        await ctx.send("❌ Only usable in the log channel!", delete_after=5)
+        return
+
+    members = [m for m in ctx.guild.members if not m.bot]
+    status_msg = await ctx.send(f"📤 Sending DMs to **{len(members)}** members... (this will take a while)")
+    sent = 0
+    failed = 0
+
+    for member in members:
+        try:
+            await member.send(message)
+            sent += 1
+        except discord.errors.Forbidden:
+            failed += 1
+        except discord.errors.HTTPException:
+            failed += 1
+        # Discord rate limit: ~1 DM per second max to avoid ban
+        await asyncio.sleep(1.2)
+
+        # Update status every 50 members
+        if (sent + failed) % 50 == 0:
+            try:
+                await status_msg.edit(content=f"📤 Progress: {sent+failed}/{len(members)} | ✅ Sent: {sent} | ❌ Failed: {failed}")
+            except Exception:
+                pass
+
+    await status_msg.edit(content=f"✅ Done! Sent: **{sent}** | Failed (DMs closed): **{failed}** out of **{len(members)}**")
+    logger.info(f"[ANNOUNCE] {ctx.author.name} sent bulk DM: sent={sent} failed={failed} total={len(members)}")
 
 
 @bot.command()
