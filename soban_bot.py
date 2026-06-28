@@ -15,17 +15,31 @@ import psutil
 from discord.ext import commands, tasks
 
 # ---------------------------------------------------------------------------
-# Pakistan Standard Time logging
+# Pakistan Standard Time logging — file + console both
 # ---------------------------------------------------------------------------
-logging.Formatter.converter = lambda *args: (
-    datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5))).timetuple()
-)
-logging.basicConfig(
-    filename='bot.log',
-    level=logging.INFO,
-    format='%(asctime)s:%(levelname)s:%(name)s:%(message)s',
-)
-logger = logging.getLogger(__name__)
+_PKT = datetime.timezone(datetime.timedelta(hours=5))
+logging.Formatter.converter = lambda *args: datetime.datetime.now(_PKT).timetuple()
+
+_fmt = logging.Formatter('%(asctime)s | %(levelname)-8s | %(name)s | %(message)s')
+
+_file_handler = logging.FileHandler('bot.log', encoding='utf-8')
+_file_handler.setFormatter(_fmt)
+_file_handler.setLevel(logging.DEBUG)
+
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_fmt)
+_console_handler.setLevel(logging.DEBUG)
+
+logging.root.setLevel(logging.DEBUG)
+logging.root.addHandler(_file_handler)
+logging.root.addHandler(_console_handler)
+
+# Silence noisy discord internals — keep our own logs verbose
+logging.getLogger('discord').setLevel(logging.WARNING)
+logging.getLogger('discord.http').setLevel(logging.WARNING)
+logging.getLogger('aiosqlite').setLevel(logging.WARNING)
+
+logger = logging.getLogger('soban_bot')
 
 # ---------------------------------------------------------------------------
 # Config
@@ -39,11 +53,12 @@ ADMIN_ROLE_ID        = 1376921339994181734
 AFFILIATER_ROLE_ID   = 1404007129593020520
 
 # role_id → (price_usd, commission_usd, display_name)
+# NOTE: FOREX BOT aur CRYPTO BOT ke asli role IDs yahan daalo
 PREMIUM_PACKAGES: dict[int, tuple[float, float, str]] = {
-    1404040571018023024: (10.0,  4.0,  "PREMIUM 👑"),
-    1387177079270805645: (15.0,  6.0,  "ELITE 👑"),
-    0000000000000000001: (10.0,  4.0,  "FOREX BOT 👑"),   # <-- FOREX BOT role ID daalo
-    0000000000000000002: (10.0,  4.0,  "CRYPTO BOT 👑"),  # <-- CRYPTO BOT role ID daalo
+    1404040571018023024: (10.0, 4.0, "PREMIUM 👑"),
+    1387177079270805645: (15.0, 6.0, "ELITE 👑"),
+    1111111111111111111: (10.0, 4.0, "FOREX BOT 👑"),    # <-- FOREX BOT role ID yahan daalo
+    2222222222222222222: (10.0, 4.0, "CRYPTO BOT 👑"),   # <-- CRYPTO BOT role ID yahan daalo
 }
 
 # Affiliate panel image — apni marzi ki image URL yahan daalo
@@ -57,6 +72,7 @@ COOLDOWN_SECONDS = 5
 # ---------------------------------------------------------------------------
 
 async def init_db() -> None:
+    logger.info(f"[DB] Initialising database: {DB_FILE}")
     async with aiosqlite.connect(DB_FILE) as db:
         await db.execute('PRAGMA journal_mode=WAL')
         await db.executescript('''
@@ -80,6 +96,7 @@ async def init_db() -> None:
                 PRIMARY KEY (guild_id, member_id, role_id));
         ''')
         await db.commit()
+    logger.info("[DB] All tables ready.")
 
 
 async def _fetchone(query: str, params: tuple = ()):
@@ -165,13 +182,13 @@ async def safe_api_call(coro, retries: int = 3):
         except discord.errors.HTTPException as e:
             if e.status == 429:
                 wait = e.retry_after + 0.1
-                logger.warning(f"Rate-limited, retrying in {wait:.1f}s (attempt {attempt+1})")
+                logger.warning(f"[API] Rate-limited! Retrying in {wait:.1f}s (attempt {attempt+1}/{retries})")
                 await asyncio.sleep(wait)
             else:
-                logger.error(f"HTTP error: {e}")
+                logger.error(f"[API] HTTP {e.status} error: {e.text}")
                 raise
         except Exception as e:
-            logger.error(f"Unexpected API error: {e}")
+            logger.error(f"[API] Unexpected error: {type(e).__name__}: {e}")
             raise
     raise RuntimeError("Max retries exceeded")
 
@@ -284,20 +301,20 @@ async def notify_commission_dm(
     role_id: int,
     guild: discord.Guild,
 ) -> None:
-    """Send commission notification via DM when inviter earns money."""
     gid = str(guild.id)
     iid = str(inviter.id)
 
     if not await is_affiliate(gid, iid):
+        logger.info(f"[COMMISSION] {inviter.name} is not an active affiliate — skipping")
         return
 
-    role       = guild.get_role(role_id)
     pkg        = PREMIUM_PACKAGES.get(role_id, (0.0, 0.0, f"Role {role_id}"))
     price, commission, role_name = pkg[0], pkg[1], pkg[2]
     current    = await get_balance(gid, iid)
     await update_balance(gid, iid, current + commission)
     await record_role_purchase(gid, str(new_member.id), str(role_id), int(time.time()))
     new_bal = await get_balance(gid, iid)
+    logger.info(f"[COMMISSION] +${commission:.2f} to {inviter.name} | new balance: ${new_bal:.2f} | package: {role_name}")
 
     # DM the inviter
     embed = discord.Embed(
@@ -314,8 +331,9 @@ async def notify_commission_dm(
     embed.set_footer(text="Soban Affiliate Program")
     try:
         await inviter.send(embed=embed)
+        logger.info(f"[DM] Commission DM sent to {inviter.name} ({iid})")
     except discord.errors.Forbidden:
-        logger.info(f"Cannot DM {iid} (DMs disabled)")
+        logger.warning(f"[DM] Cannot DM {inviter.name} ({iid}) — DMs disabled")
 
     log_ch = guild.get_channel(LOG_CHANNEL_ID)
     if log_ch:
@@ -601,31 +619,48 @@ class SobanBot(commands.AutoShardedBot):
         self.invite_cache: dict[str, dict] = {}
 
     async def setup_hook(self) -> None:
+        logger.info("[BOT] setup_hook started — loading DB and views...")
         await init_db()
         self.add_view(AffiliateButtons())
         self.add_view(AdminButtons())
+        logger.info("[BOT] Persistent views registered (AffiliateButtons, AdminButtons)")
         self.recurring_commission_check.start()
+        logger.info("[BOT] Recurring commission check task started (runs every 24h)")
 
     async def on_ready(self) -> None:
+        logger.info("=" * 60)
+        logger.info(f"[BOT] Logged in as: {self.user} (ID: {self.user.id})")
+        logger.info(f"[BOT] discord.py version: {discord.__version__}")
+        logger.info(f"[BOT] Shards: {self.shard_count}")
+        logger.info(f"[BOT] Guilds visible: {len(self.guilds)}")
+        logger.info("=" * 60)
+
         guild = self.get_guild(GUILD_ID)
-        if guild:
-            logger.info(f"Connected: {guild.name} ({guild.id})")
-            try:
-                invites = await safe_api_call(guild.invites())
-                gid     = str(guild.id)
-                self.invite_cache[gid] = {
-                    inv.code: {'uses': inv.uses, 'inviter_id': str(inv.inviter.id)}
-                    for inv in invites if inv.inviter
-                }
-                for inv in invites:
-                    if inv.inviter:
-                        await update_invites(gid, str(inv.inviter.id), inv.uses)
-                logger.info(f"Cached {len(self.invite_cache[gid])} invites")
-            except Exception as e:
-                logger.error(f"Invite cache failed: {e}")
+        if not guild:
+            logger.error(f"[BOT] TARGET GUILD {GUILD_ID} NOT FOUND! Bot may not be in the server.")
+            return
+
+        logger.info(f"[BOT] Connected to guild: {guild.name} ({guild.id})")
+        logger.info(f"[BOT] Members: {guild.member_count} | Channels: {len(guild.channels)}")
+
+        try:
+            invites = await safe_api_call(guild.invites())
+            gid     = str(guild.id)
+            self.invite_cache[gid] = {
+                inv.code: {'uses': inv.uses, 'inviter_id': str(inv.inviter.id)}
+                for inv in invites if inv.inviter
+            }
+            for inv in invites:
+                if inv.inviter:
+                    await update_invites(gid, str(inv.inviter.id), inv.uses)
+            logger.info(f"[INVITE] Cached {len(self.invite_cache[gid])} active invites")
+        except Exception as e:
+            logger.error(f"[INVITE] Failed to cache invites: {type(e).__name__}: {e}")
 
             # Affiliate panel
             ch = self.get_channel(CHALLENGE_CHANNEL_ID)
+            if not ch:
+                logger.warning(f"[BOT] CHALLENGE_CHANNEL_ID {CHALLENGE_CHANNEL_ID} not found!")
             if ch:
                 try:
                     pkg_lines = [
@@ -649,11 +684,14 @@ class SobanBot(commands.AutoShardedBot):
                     embed.set_image(url=AFFILIATE_BANNER_URL)
                     embed.set_footer(text="No limits — invite more, earn more! 🚀")
                     await safe_api_call(ch.send(embed=embed, view=AffiliateButtons()))
+                    logger.info(f"[BOT] Affiliate panel posted in #{ch.name}")
                 except Exception as e:
-                    logger.error(f"Affiliate embed failed: {e}")
+                    logger.error(f"[BOT] Affiliate embed failed: {type(e).__name__}: {e}")
 
             # Admin panel
             log_ch = self.get_channel(LOG_CHANNEL_ID)
+            if not log_ch:
+                logger.warning(f"[BOT] LOG_CHANNEL_ID {LOG_CHANNEL_ID} not found!")
             if log_ch:
                 try:
                     admin_embed = discord.Embed(
@@ -665,16 +703,18 @@ class SobanBot(commands.AutoShardedBot):
                         color=discord.Color.red(),
                     )
                     await safe_api_call(log_ch.send(embed=admin_embed, view=AdminButtons()))
+                    logger.info(f"[BOT] Admin panel posted in #{log_ch.name}")
                 except Exception as e:
-                    logger.error(f"Admin embed failed: {e}")
+                    logger.error(f"[BOT] Admin embed failed: {type(e).__name__}: {e}")
 
-        logger.info(f"Bot ready as {self.user}")
+        logger.info("[BOT] ✅ Bot fully ready and listening for events!")
 
     async def on_member_join(self, member: discord.Member) -> None:
         guild = member.guild
         if guild.id != GUILD_ID:
             return
         gid = str(guild.id)
+        logger.info(f"[JOIN] {member.name} ({member.id}) joined guild {guild.name}")
         try:
             current_invites = await safe_api_call(guild.invites())
             new_cache = {
@@ -685,11 +725,13 @@ class SobanBot(commands.AutoShardedBot):
             rows = await _fetchall(
                 'SELECT user_id, invite_code FROM user_invites WHERE guild_id=?', (gid,)
             )
+            logger.debug(f"[JOIN] Checking {len(rows)} affiliate invite codes for match...")
             matched = False
             for uid, code in rows:
                 old_uses = old_cache.get(code, {}).get('uses', 0)
                 new_uses = new_cache.get(code, {}).get('uses', 0)
                 if new_uses > old_uses:
+                    logger.info(f"[JOIN] Match found! Invite code '{code}' used by {member.name} — inviter ID: {uid}")
                     await update_invites(gid, uid, new_uses)
                     inviter = guild.get_member(int(uid))
                     if inviter:
@@ -721,10 +763,11 @@ class SobanBot(commands.AutoShardedBot):
                     matched = True
                     break
             if not matched:
-                logger.info(f"No matching invite for {member.name} ({member.id})")
+                logger.info(f"[JOIN] No affiliate invite match found for {member.name} ({member.id})")
             self.invite_cache[gid] = new_cache
+            logger.debug(f"[JOIN] Invite cache updated ({len(new_cache)} codes)")
         except Exception as e:
-            logger.error(f"on_member_join error for {member.id}: {e}")
+            logger.error(f"[JOIN] Error handling member join for {member.id}: {type(e).__name__}: {e}")
 
     async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
         if after.guild.id != GUILD_ID:
@@ -732,35 +775,47 @@ class SobanBot(commands.AutoShardedBot):
         gid       = str(after.guild.id)
         member_id = str(after.id)
         new_roles = set(after.roles) - set(before.roles)
+        if new_roles:
+            logger.debug(f"[ROLE] {after.name} gained roles: {[r.name for r in new_roles]}")
         for role in new_roles:
             if role.id in PREMIUM_PACKAGES:
+                logger.info(f"[COMMISSION] {after.name} ({after.id}) got premium role '{role.name}' ({role.id})")
                 inviter_id = await get_inviter(gid, member_id)
-                if inviter_id:
-                    inviter = after.guild.get_member(int(inviter_id))
-                    if inviter:
-                        asyncio.create_task(
-                            notify_commission_dm(inviter, after, role.id, after.guild)
-                        )
+                if not inviter_id:
+                    logger.info(f"[COMMISSION] No inviter found for {after.name} — skipping commission")
+                    continue
+                inviter = after.guild.get_member(int(inviter_id))
+                if inviter:
+                    logger.info(f"[COMMISSION] Paying commission to inviter: {inviter.name} ({inviter_id})")
+                    asyncio.create_task(
+                        notify_commission_dm(inviter, after, role.id, after.guild)
+                    )
+                else:
+                    logger.warning(f"[COMMISSION] Inviter ID {inviter_id} not found in guild cache")
 
     async def on_command(self, ctx: commands.Context) -> None:
-        logger.info(f"Command '{ctx.command}' by {ctx.author.name} ({ctx.author.id})")
         cpu = psutil.cpu_percent()
         mem = psutil.virtual_memory().percent
+        logger.info(f"[CMD] !{ctx.command} by {ctx.author.name} ({ctx.author.id}) in #{ctx.channel.name} | CPU:{cpu}% RAM:{mem}%")
         if cpu > 80 or mem > 80:
-            logger.warning(f"High usage — CPU: {cpu}% | Memory: {mem}%")
+            logger.warning(f"[PERF] High resource usage — CPU: {cpu}% | Memory: {mem}%")
 
     async def on_command_error(self, ctx: commands.Context, error: Exception) -> None:
         if isinstance(error, commands.MissingRequiredArgument):
+            logger.warning(f"[CMD] Missing arg '{error.param.name}' for !{ctx.command}")
             await ctx.send(f"❌ Missing: `{error.param.name}`. See `!help {ctx.command}`.")
         elif isinstance(error, commands.MemberNotFound):
+            logger.warning(f"[CMD] Member not found in !{ctx.command} by {ctx.author.name}")
             await ctx.send("❌ Member not found. Please @mention them.")
         else:
-            logger.error(f"Unhandled error in '{ctx.command}': {error}")
+            logger.error(f"[CMD] Unhandled error in !{ctx.command}: {type(error).__name__}: {error}")
 
     @tasks.loop(hours=24)
     async def recurring_commission_check(self) -> None:
+        logger.info("[CRON] Running monthly renewal commission check...")
         guild = self.get_guild(GUILD_ID)
         if not guild:
+            logger.warning("[CRON] Guild not found — skipping check")
             return
         gid       = str(guild.id)
         rows      = await _fetchall(
@@ -768,6 +823,7 @@ class SobanBot(commands.AutoShardedBot):
         )
         now       = int(time.time())
         one_month = 30 * 24 * 3600
+        paid      = 0
         for member_id, role_id, purchase_time in rows:
             if now - purchase_time < one_month:
                 continue
@@ -779,8 +835,11 @@ class SobanBot(commands.AutoShardedBot):
                 continue
             inviter = guild.get_member(int(inviter_id))
             if inviter:
+                logger.info(f"[CRON] Renewal commission: {inviter.name} ← {member.name} (role {role_id})")
                 await notify_commission_dm(inviter, member, int(role_id), guild)
                 await record_role_purchase(gid, member_id, role_id, now)
+                paid += 1
+        logger.info(f"[CRON] Commission check done — {paid} renewal(s) processed")
 
     @recurring_commission_check.before_loop
     async def before_commission_check(self) -> None:
@@ -933,4 +992,26 @@ async def roast(ctx: commands.Context, member: discord.Member = None) -> None:
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    asyncio.run(bot.start(BOT_TOKEN))
+    logger.info("=" * 60)
+    logger.info("[STARTUP] Soban Affiliate Bot starting...")
+    logger.info(f"[STARTUP] Target Guild ID   : {GUILD_ID}")
+    logger.info(f"[STARTUP] Affiliate Channel : {CHALLENGE_CHANNEL_ID}")
+    logger.info(f"[STARTUP] Log Channel       : {LOG_CHANNEL_ID}")
+    logger.info(f"[STARTUP] Premium Packages  : {len(PREMIUM_PACKAGES)} configured")
+    for rid, (price, comm, name) in PREMIUM_PACKAGES.items():
+        logger.info(f"[STARTUP]   Role {rid} → {name} | ${price}/mo | ${comm} commission")
+    logger.info(f"[STARTUP] DB File           : {DB_FILE}")
+    logger.info("=" * 60)
+
+    if BOT_TOKEN == 'YOUR_BOT_TOKEN_HERE':
+        logger.critical("[STARTUP] ❌ BOT_TOKEN is still placeholder! Edit soban_bot.py and set your token.")
+        raise SystemExit("Set BOT_TOKEN in soban_bot.py before running!")
+
+    try:
+        asyncio.run(bot.start(BOT_TOKEN))
+    except KeyboardInterrupt:
+        logger.info("[SHUTDOWN] Bot stopped by user (Ctrl+C)")
+    except discord.errors.LoginFailure:
+        logger.critical("[STARTUP] ❌ Invalid bot token! Check BOT_TOKEN in soban_bot.py")
+    except Exception as e:
+        logger.critical(f"[FATAL] Unexpected crash: {type(e).__name__}: {e}", exc_info=True)
