@@ -657,55 +657,55 @@ class SobanBot(commands.AutoShardedBot):
         except Exception as e:
             logger.error(f"[INVITE] Failed to cache invites: {type(e).__name__}: {e}")
 
-            # Affiliate panel
-            ch = self.get_channel(CHALLENGE_CHANNEL_ID)
-            if not ch:
-                logger.warning(f"[BOT] CHALLENGE_CHANNEL_ID {CHALLENGE_CHANNEL_ID} not found!")
-            if ch:
-                try:
-                    pkg_lines = [
-                        f"• **{pkg_name}**: ${price:.2f}/mo → you earn **${commission:.2f}**"
-                        for _, (price, commission, pkg_name) in PREMIUM_PACKAGES.items()
-                    ]
-                    embed = discord.Embed(
-                        title="💸 Affiliate Program — Earn Commission",
-                        description=(
-                            "Invite people to this server and earn commission "
-                            "every time someone you invited buys or renews a Premium Package!\n\n"
-                            "**How it works:**\n"
-                            "1️⃣ Click **🚀 Start Affiliate Program** below\n"
-                            "2️⃣ Get your unique referral invite link\n"
-                            "3️⃣ Share it — when your invites buy premium, **you earn commission**\n"
-                            "4️⃣ Track everything on your personal **📊 Dashboard**\n\n"
-                            "**Premium Packages:**\n" + "\n".join(pkg_lines)
-                        ),
-                        color=discord.Color.dark_green(),
-                    )
-                    embed.set_image(url=AFFILIATE_BANNER_URL)
-                    embed.set_footer(text="No limits — invite more, earn more! 🚀")
-                    await safe_api_call(ch.send(embed=embed, view=AffiliateButtons()))
-                    logger.info(f"[BOT] Affiliate panel posted in #{ch.name}")
-                except Exception as e:
-                    logger.error(f"[BOT] Affiliate embed failed: {type(e).__name__}: {e}")
+        # Affiliate panel
+        ch = self.get_channel(CHALLENGE_CHANNEL_ID)
+        if not ch:
+            logger.warning(f"[BOT] CHALLENGE_CHANNEL_ID {CHALLENGE_CHANNEL_ID} not found!")
+        if ch:
+            try:
+                pkg_lines = [
+                    f"• **{pkg_name}**: ${price:.2f}/mo → you earn **${commission:.2f}**"
+                    for _, (price, commission, pkg_name) in PREMIUM_PACKAGES.items()
+                ]
+                embed = discord.Embed(
+                    title="💸 Affiliate Program — Earn Commission",
+                    description=(
+                        "Invite people to this server and earn commission "
+                        "every time someone you invited buys or renews a Premium Package!\n\n"
+                        "**How it works:**\n"
+                        "1️⃣ Click **🚀 Start Affiliate Program** below\n"
+                        "2️⃣ Get your unique referral invite link\n"
+                        "3️⃣ Share it — when your invites buy premium, **you earn commission**\n"
+                        "4️⃣ Track everything on your personal **📊 Dashboard**\n\n"
+                        "**Premium Packages:**\n" + "\n".join(pkg_lines)
+                    ),
+                    color=discord.Color.dark_green(),
+                )
+                embed.set_image(url=AFFILIATE_BANNER_URL)
+                embed.set_footer(text="No limits — invite more, earn more! 🚀")
+                await safe_api_call(ch.send(embed=embed, view=AffiliateButtons()))
+                logger.info(f"[BOT] Affiliate panel posted in #{ch.name}")
+            except Exception as e:
+                logger.error(f"[BOT] Affiliate embed failed: {type(e).__name__}: {e}")
 
-            # Admin panel
-            log_ch = self.get_channel(LOG_CHANNEL_ID)
-            if not log_ch:
-                logger.warning(f"[BOT] LOG_CHANNEL_ID {LOG_CHANNEL_ID} not found!")
-            if log_ch:
-                try:
-                    admin_embed = discord.Embed(
-                        title="🛡️ Admin Control Panel",
-                        description=(
-                            "Manage affiliate balances with the buttons below.\n"
-                            "Commands: `!resetbalance @user` | `!listbalances` | `!dashboard @user`"
-                        ),
-                        color=discord.Color.red(),
-                    )
-                    await safe_api_call(log_ch.send(embed=admin_embed, view=AdminButtons()))
-                    logger.info(f"[BOT] Admin panel posted in #{log_ch.name}")
-                except Exception as e:
-                    logger.error(f"[BOT] Admin embed failed: {type(e).__name__}: {e}")
+        # Admin panel
+        log_ch = self.get_channel(LOG_CHANNEL_ID)
+        if not log_ch:
+            logger.warning(f"[BOT] LOG_CHANNEL_ID {LOG_CHANNEL_ID} not found!")
+        if log_ch:
+            try:
+                admin_embed = discord.Embed(
+                    title="🛡️ Admin Control Panel",
+                    description=(
+                        "Manage affiliate balances with the buttons below.\n"
+                        "Commands: `!resetbalance @user` | `!listbalances` | `!dashboard @user`"
+                    ),
+                    color=discord.Color.red(),
+                )
+                await safe_api_call(log_ch.send(embed=admin_embed, view=AdminButtons()))
+                logger.info(f"[BOT] Admin panel posted in #{log_ch.name}")
+            except Exception as e:
+                logger.error(f"[BOT] Admin embed failed: {type(e).__name__}: {e}")
 
         logger.info("[BOT] ✅ Bot fully ready and listening for events!")
 
