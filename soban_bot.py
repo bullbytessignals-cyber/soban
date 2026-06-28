@@ -975,8 +975,12 @@ async def checkchannel(ctx: commands.Context) -> None:
 
 
 @bot.command()
-async def announce(ctx: commands.Context, *, message: str) -> None:
-    """Admin only — DM send karta hai saare members ko (rate-limited, slow)"""
+async def announce(ctx: commands.Context, title: str, description: str, image_url: str = None) -> None:
+    """
+    Admin only — Embed DM bhejta hai saare members ko.
+    Usage: !announce "Title" "Description" https://image-url.png
+    Image optional hai.
+    """
     if ctx.guild.id != GUILD_ID:
         return
     if not is_admin(ctx.author, ctx.guild):
@@ -986,31 +990,76 @@ async def announce(ctx: commands.Context, *, message: str) -> None:
         await ctx.send("❌ Only usable in the log channel!", delete_after=5)
         return
 
+    # Preview embed admin ko dikhao confirm karne ke liye
+    preview = discord.Embed(
+        title=title,
+        description=description,
+        color=discord.Color.dark_green(),
+        timestamp=pkt_now(),
+    )
+    preview.set_author(name=ctx.guild.name, icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
+    if image_url:
+        preview.set_image(url=image_url)
+    preview.set_footer(text=f"From: {ctx.guild.name}")
+
     members = [m for m in ctx.guild.members if not m.bot]
-    status_msg = await ctx.send(f"📤 Sending DMs to **{len(members)}** members... (this will take a while)")
-    sent = 0
+    await ctx.send(
+        f"📋 **Preview** (ye DM jayega **{len(members)}** members ko):\n"
+        f"Reply karo `yes` confirm karne ke liye ya `no` cancel karne ke liye:",
+        embed=preview,
+    )
+
+    def check(m: discord.Message) -> bool:
+        return m.author.id == ctx.author.id and m.channel.id == ctx.channel.id
+
+    try:
+        reply = await ctx.bot.wait_for('message', check=check, timeout=30.0)
+    except asyncio.TimeoutError:
+        await ctx.send("⏰ Timed out — cancelled.")
+        return
+
+    if reply.content.strip().lower() != 'yes':
+        await ctx.send("❌ Cancelled.")
+        return
+
+    status_msg = await ctx.send(f"📤 Sending DMs to **{len(members)}** members... (is mein ~{len(members)//50} minutes lagenge)")
+    sent   = 0
     failed = 0
 
     for member in members:
         try:
-            await member.send(message)
+            dm_embed = discord.Embed(
+                title=title,
+                description=description,
+                color=discord.Color.dark_green(),
+                timestamp=pkt_now(),
+            )
+            dm_embed.set_author(name=ctx.guild.name, icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
+            if image_url:
+                dm_embed.set_image(url=image_url)
+            dm_embed.set_footer(text=f"From: {ctx.guild.name}")
+            await member.send(embed=dm_embed)
             sent += 1
         except discord.errors.Forbidden:
             failed += 1
-        except discord.errors.HTTPException:
+        except discord.errors.HTTPException as e:
+            logger.warning(f"[ANNOUNCE] DM failed for {member.id}: {e}")
             failed += 1
-        # Discord rate limit: ~1 DM per second max to avoid ban
+
         await asyncio.sleep(1.2)
 
-        # Update status every 50 members
         if (sent + failed) % 50 == 0:
             try:
-                await status_msg.edit(content=f"📤 Progress: {sent+failed}/{len(members)} | ✅ Sent: {sent} | ❌ Failed: {failed}")
+                await status_msg.edit(
+                    content=f"📤 Progress: **{sent+failed}/{len(members)}** | ✅ Sent: {sent} | ❌ Failed: {failed}"
+                )
             except Exception:
                 pass
 
-    await status_msg.edit(content=f"✅ Done! Sent: **{sent}** | Failed (DMs closed): **{failed}** out of **{len(members)}**")
-    logger.info(f"[ANNOUNCE] {ctx.author.name} sent bulk DM: sent={sent} failed={failed} total={len(members)}")
+    await status_msg.edit(
+        content=f"✅ **Done!** Sent: **{sent}** | DMs closed: **{failed}** | Total: **{len(members)}**"
+    )
+    logger.info(f"[ANNOUNCE] {ctx.author.name} sent bulk embed DM: sent={sent} failed={failed} total={len(members)}")
 
 
 @bot.command()
