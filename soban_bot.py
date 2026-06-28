@@ -1,5 +1,6 @@
 """
 Soban Discord Affiliate Bot — single-file edition
+Dashboard delivered via ephemeral messages (only visible to the user)
 """
 
 import asyncio
@@ -27,14 +28,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Config — sirf yahan edit karo
+# Config
 # ---------------------------------------------------------------------------
 BOT_TOKEN            = 'YOUR_BOT_TOKEN_HERE'   # <-- apna token yahan daalo
 
 GUILD_ID             = 1348248729878134885
 CHALLENGE_CHANNEL_ID = 1388256520541700176
 LOG_CHANNEL_ID       = 1388138273834012682
-CATEGORY_ID          = 1428941254544064522
 ADMIN_ROLE_ID        = 1376921339994181734
 AFFILIATER_ROLE_ID   = 1404007129593020520
 
@@ -47,7 +47,7 @@ DB_FILE          = 'bot_data.db'
 COOLDOWN_SECONDS = 5
 
 # ---------------------------------------------------------------------------
-# Database — fully async via aiosqlite
+# Database
 # ---------------------------------------------------------------------------
 
 async def init_db() -> None:
@@ -69,9 +69,6 @@ async def init_db() -> None:
             CREATE TABLE IF NOT EXISTS invited_members (
                 guild_id TEXT, member_id TEXT, inviter_id TEXT,
                 PRIMARY KEY (guild_id, member_id));
-            CREATE TABLE IF NOT EXISTS channels (
-                guild_id TEXT, user_id TEXT, channel_id TEXT,
-                PRIMARY KEY (guild_id, user_id));
             CREATE TABLE IF NOT EXISTS role_purchases (
                 guild_id TEXT, member_id TEXT, role_id TEXT, purchase_time INTEGER,
                 PRIMARY KEY (guild_id, member_id, role_id));
@@ -130,24 +127,15 @@ async def get_inviter(gid: str, member_id: str) -> str | None:
 async def update_invited_member(gid: str, member_id: str, inviter_id: str | None) -> None:
     await _execute('INSERT OR REPLACE INTO invited_members VALUES (?,?,?)', (gid, member_id, inviter_id))
 
-async def get_channel(gid: str, uid: str) -> str | None:
-    r = await _fetchone('SELECT channel_id FROM channels WHERE guild_id=? AND user_id=?', (gid, uid))
-    return r[0] if r else None
-
-async def update_channel(gid: str, uid: str, channel_id: str) -> None:
-    await _execute('INSERT OR REPLACE INTO channels VALUES (?,?,?)', (gid, uid, channel_id))
-
 async def record_role_purchase(gid: str, member_id: str, role_id: str, purchase_time: int) -> None:
     await _execute('INSERT OR REPLACE INTO role_purchases VALUES (?,?,?,?)',
                    (gid, member_id, role_id, purchase_time))
 
 async def delete_affiliate_data(gid: str, uid: str) -> None:
-    for table, col in [('channels', 'user_id'), ('user_invites', 'user_id'),
-                       ('invites', 'user_id'), ('affiliates', 'user_id')]:
+    for table, col in [('user_invites', 'user_id'), ('invites', 'user_id'), ('affiliates', 'user_id')]:
         await _execute(f'DELETE FROM {table} WHERE guild_id=? AND {col}=?', (gid, uid))
 
 async def get_all_commissions(gid: str, uid: str) -> list[tuple]:
-    """Returns list of (role_id, purchase_time) for members invited by uid."""
     rows = await _fetchall(
         'SELECT member_id FROM invited_members WHERE guild_id=? AND inviter_id=?', (gid, uid)
     )
@@ -182,54 +170,6 @@ async def safe_api_call(coro, retries: int = 3):
     raise RuntimeError("Max retries exceeded")
 
 
-async def get_or_create_user_channel(
-    user: discord.Member, guild: discord.Guild
-) -> discord.TextChannel | None:
-    gid = str(guild.id)
-    uid = str(user.id)
-    cid = await get_channel(gid, uid)
-    if cid:
-        ch = guild.get_channel(int(cid))
-        if ch:
-            perms = ch.permissions_for(user)
-            if not (perms.read_messages and perms.send_messages):
-                try:
-                    await safe_api_call(ch.set_permissions(
-                        user, read_messages=True, read_message_history=True,
-                        send_messages=True, attach_files=True, send_voice_messages=True,
-                    ))
-                except Exception as e:
-                    logger.error(f"Permission fix failed for {uid}: {e}")
-            return ch
-    try:
-        category = guild.get_channel(CATEGORY_ID)
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            user: discord.PermissionOverwrite(
-                read_messages=True, read_message_history=True,
-                send_messages=True, attach_files=True, send_voice_messages=True,
-            ),
-            guild.me: discord.PermissionOverwrite(
-                read_messages=True, send_messages=True,
-                embed_links=True, attach_files=True,
-            ),
-        }
-        name = f"affiliate-{user.name.lower().replace(' ', '-')[:20]}"
-        ch = await safe_api_call(
-            guild.create_text_channel(name, overwrites=overwrites, category=category)
-        )
-        await update_channel(gid, uid, str(ch.id))
-        log_ch = guild.get_channel(LOG_CHANNEL_ID)
-        if log_ch:
-            await safe_api_call(log_ch.send(
-                f"📢 Private channel created for {user.name} ({uid}): {ch.name}"
-            ))
-        return ch
-    except Exception as e:
-        logger.error(f"Channel creation failed for {uid}: {e}")
-        return None
-
-
 def is_admin(member: discord.Member, guild: discord.Guild) -> bool:
     role = guild.get_role(ADMIN_ROLE_ID)
     return bool(role and role in member.roles)
@@ -240,79 +180,53 @@ _cooldowns: dict[str, float] = {}
 def check_cooldown(uid: str) -> float:
     return max(COOLDOWN_SECONDS - (time.time() - _cooldowns.get(uid, 0)), 0)
 
+
+def pkt_now() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5)))
+
 # ---------------------------------------------------------------------------
-# Dashboard embed builder
+# Dashboard embed — ephemeral (sirf us user ko dikhega)
 # ---------------------------------------------------------------------------
 
 async def build_dashboard_embed(
     user: discord.Member,
     guild: discord.Guild,
     invite_url: str | None = None,
+    event_text: str | None = None,
 ) -> discord.Embed:
-    gid        = str(guild.id)
-    uid        = str(user.id)
-    balance    = await get_balance(gid, uid)
-    inv_count  = await get_invites(gid, uid)
+    gid         = str(guild.id)
+    uid         = str(user.id)
+    balance     = await get_balance(gid, uid)
+    inv_count   = await get_invites(gid, uid)
     commissions = await get_all_commissions(gid, uid)
 
-    total_earned = balance
     monthly_potential = sum(
         PREMIUM_ROLE_PRICES.get(int(role_id), 0.0) * 0.5
         for role_id, _ in commissions
     )
 
-    # Build invited members list (up to 5 shown)
     invited_rows = await _fetchall(
         'SELECT member_id FROM invited_members WHERE guild_id=? AND inviter_id=?', (gid, uid)
     )
-    active_members = 0
-    for (mid,) in invited_rows:
-        member = guild.get_member(int(mid))
-        if member:
-            active_members += 1
-
-    now_pkt = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5)))
+    active_members = sum(
+        1 for (mid,) in invited_rows if guild.get_member(int(mid))
+    )
 
     embed = discord.Embed(
-        title="📊 Affiliate Dashboard",
+        title="📊 Your Affiliate Dashboard",
+        description=event_text or "Here's your latest affiliate stats:",
         color=discord.Color.dark_green(),
-        timestamp=now_pkt,
+        timestamp=pkt_now(),
     )
     embed.set_author(name=user.display_name, icon_url=user.display_avatar.url)
 
-    # Stats row
-    embed.add_field(
-        name="👥 Total Invites",
-        value=f"```{inv_count}```",
-        inline=True,
-    )
-    embed.add_field(
-        name="✅ Active Members",
-        value=f"```{active_members}```",
-        inline=True,
-    )
-    embed.add_field(
-        name="💰 Total Earned",
-        value=f"```${total_earned:.2f}```",
-        inline=True,
-    )
-    embed.add_field(
-        name="🔄 Monthly Commission",
-        value=f"```${monthly_potential:.2f}/mo```",
-        inline=True,
-    )
-    embed.add_field(
-        name="📦 Packages Sold",
-        value=f"```{len(commissions)}```",
-        inline=True,
-    )
-    embed.add_field(
-        name="💵 Commission Rate",
-        value="```50%```",
-        inline=True,
-    )
+    embed.add_field(name="👥 Total Invites",     value=f"```{inv_count}```",             inline=True)
+    embed.add_field(name="✅ Active Members",    value=f"```{active_members}```",         inline=True)
+    embed.add_field(name="💰 Total Earned",      value=f"```${balance:.2f}```",           inline=True)
+    embed.add_field(name="🔄 Monthly Est.",      value=f"```${monthly_potential:.2f}```", inline=True)
+    embed.add_field(name="📦 Packages Sold",     value=f"```{len(commissions)}```",       inline=True)
+    embed.add_field(name="💵 Commission Rate",   value="```50%```",                       inline=True)
 
-    # Invite link
     if invite_url:
         embed.add_field(
             name="🔗 Your Referral Link",
@@ -320,55 +234,56 @@ async def build_dashboard_embed(
             inline=False,
         )
 
-    # Package prices info
-    guild_obj = guild
     pkg_lines = []
     for role_id, price in PREMIUM_ROLE_PRICES.items():
-        role = guild_obj.get_role(role_id)
+        role = guild.get_role(role_id)
         name = role.name if role else f"Role {role_id}"
-        pkg_lines.append(f"• {name}: ${price:.2f}/mo → you earn ${price*0.5:.2f}")
+        pkg_lines.append(f"• **{name}**: ${price:.2f}/mo → you earn **${price*0.5:.2f}**")
     embed.add_field(
         name="📋 Commission Structure",
-        value="\n".join(pkg_lines) if pkg_lines else "No packages configured",
+        value="\n".join(pkg_lines),
         inline=False,
     )
 
-    embed.set_footer(text="Dashboard • Updates on every invite & purchase")
+    embed.set_footer(text="Only you can see this • Updates on every invite & purchase")
     return embed
 
 
-async def send_dashboard_update(
-    user: discord.Member,
-    guild: discord.Guild,
+async def send_ephemeral_dashboard(
+    interaction: discord.Interaction,
     event_text: str | None = None,
+    already_deferred: bool = False,
 ) -> None:
-    channel = await get_or_create_user_channel(user, guild)
-    if not channel:
-        return
-    invite_url = None
-    code = await get_user_invite(str(guild.id), str(user.id))
-    if code:
-        invite_url = f"https://discord.gg/{code}"
+    """Send/update dashboard as ephemeral message — only the user sees it."""
+    user  = interaction.user
+    guild = interaction.guild
+    gid   = str(guild.id)
+    uid   = str(user.id)
 
-    embed = await build_dashboard_embed(user, guild, invite_url)
-    if event_text:
-        embed.description = event_text
+    code       = await get_user_invite(gid, uid)
+    invite_url = f"https://discord.gg/{code}" if code else None
 
-    try:
-        await safe_api_call(channel.send(embed=embed))
-    except Exception as e:
-        logger.error(f"send_dashboard_update failed for {user.id}: {e}")
+    embed = await build_dashboard_embed(user, guild, invite_url, event_text)
 
-# ---------------------------------------------------------------------------
-# Commission logic
-# ---------------------------------------------------------------------------
+    if already_deferred:
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    else:
+        try:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        except discord.errors.InteractionResponded:
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
-async def notify_commission(
-    inviter: discord.Member, new_member: discord.Member,
-    role_id: int, guild: discord.Guild,
+
+async def notify_commission_dm(
+    inviter: discord.Member,
+    new_member: discord.Member,
+    role_id: int,
+    guild: discord.Guild,
 ) -> None:
+    """Send commission notification via DM when inviter earns money."""
     gid = str(guild.id)
     iid = str(inviter.id)
+
     if not await is_affiliate(gid, iid):
         return
 
@@ -381,15 +296,23 @@ async def notify_commission(
     await record_role_purchase(gid, str(new_member.id), str(role_id), int(time.time()))
     new_bal = await get_balance(gid, iid)
 
-    event_text = (
-        f"💥 **Commission Earned!**\n"
-        f"{new_member.mention} just bought **{role_name}**!\n"
-        f"You earned **${commission:.2f}** (50% of ${price:.2f})\n"
-        f"New balance: **${new_bal:.2f}**\n"
-        f"> Contact an admin to claim your earnings 💪"
+    # DM the inviter
+    embed = discord.Embed(
+        title="💸 Commission Earned!",
+        description=(
+            f"**{new_member.display_name}** just bought **{role_name}**!\n\n"
+            f"💰 You earned: **${commission:.2f}** (50% of ${price:.2f})\n"
+            f"💼 New balance: **${new_bal:.2f}**\n\n"
+            f"Contact an admin in **{guild.name}** to claim your earnings!"
+        ),
+        color=discord.Color.gold(),
+        timestamp=pkt_now(),
     )
-
-    await send_dashboard_update(inviter, guild, event_text)
+    embed.set_footer(text="Soban Affiliate Program")
+    try:
+        await inviter.send(embed=embed)
+    except discord.errors.Forbidden:
+        logger.info(f"Cannot DM {iid} (DMs disabled)")
 
     log_ch = guild.get_channel(LOG_CHANNEL_ID)
     if log_ch:
@@ -418,8 +341,12 @@ class AffiliateButtons(discord.ui.View):
         _cooldowns[uid] = time.time()
         return True
 
-    @discord.ui.button(label="Start Affiliate Program", style=discord.ButtonStyle.green,
-                       emoji="🚀", custom_id="affiliate:start")
+    @discord.ui.button(
+        label="Start Affiliate Program",
+        style=discord.ButtonStyle.green,
+        emoji="🚀",
+        custom_id="affiliate:start",
+    )
     async def start_affiliate(self, interaction: discord.Interaction, button: discord.ui.Button):
         user  = interaction.user
         guild = interaction.guild
@@ -427,21 +354,25 @@ class AffiliateButtons(discord.ui.View):
         uid   = str(user.id)
 
         if guild.id != GUILD_ID:
-            await interaction.response.send_message(
-                "❌ This command only works in the specified server!", ephemeral=True
-            )
+            await interaction.response.send_message("❌ Wrong server!", ephemeral=True)
             return
+
         await interaction.response.defer(ephemeral=True)
 
         if await is_affiliate(gid, uid):
-            await interaction.followup.send(
-                "✅ You're already an Affiliate Partner! Check your private channel.", ephemeral=True
+            # Already in — just show their dashboard
+            await send_ephemeral_dashboard(
+                interaction,
+                event_text="✅ You're already an Affiliate Partner! Here's your dashboard:",
+                already_deferred=True,
             )
             return
 
+        # Reset invite data for fresh start
         await update_invites(gid, uid, 0)
         await update_invited_member(gid, uid, None)
 
+        # Assign Affiliater role
         aff_role = guild.get_role(AFFILIATER_ROLE_ID)
         if aff_role and aff_role not in user.roles:
             try:
@@ -449,63 +380,52 @@ class AffiliateButtons(discord.ui.View):
             except Exception as e:
                 logger.error(f"Role assign error for {uid}: {e}")
 
-        channel = await get_or_create_user_channel(user, guild)
-        if not channel:
-            await interaction.followup.send(
-                "❌ Couldn't create your channel. Ask an admin to check permissions!", ephemeral=True
-            )
-            return
-
+        # Create unique invite link
         try:
             src    = guild.get_channel(CHALLENGE_CHANNEL_ID) or guild.text_channels[0]
             invite = await safe_api_call(src.create_invite(max_age=0, unique=True))
         except Exception as e:
             logger.error(f"Invite creation failed for {uid}: {e}")
             await interaction.followup.send(
-                "❌ Can't create invites! Ask an admin to fix my permissions!", ephemeral=True
+                "❌ Can't create your invite link! Ask an admin to fix my permissions.",
+                ephemeral=True,
             )
             return
 
         await update_user_invite(gid, uid, invite.code)
         await update_affiliate(gid, uid, 1)
 
+        # Cache invite
         bot_obj: SobanBot = interaction.client
         bot_obj.invite_cache.setdefault(gid, {})[invite.code] = {
-            'uses': invite.uses, 'inviter_id': uid
+            'uses': invite.uses, 'inviter_id': uid,
         }
 
-        # Welcome embed
-        welcome = discord.Embed(
-            title="🎉 Welcome to the Affiliate Program!",
-            description=(
-                f"Hey {user.mention}, you're officially in! 🚀\n\n"
-                f"Share your link below. When someone you invite buys a **Premium Package**, "
-                f"you earn **50% commission** — every month they renew!\n\n"
-                f"Your dashboard below stays updated with every invite and purchase."
+        # Send dashboard as ephemeral — only this user sees it
+        await send_ephemeral_dashboard(
+            interaction,
+            event_text=(
+                f"🎉 **Welcome to the Affiliate Program!**\n\n"
+                f"Share your referral link below. When someone you invited buys a "
+                f"**Premium Package**, you earn **50% commission** — every month they renew!\n\n"
+                f"This dashboard is **only visible to you**. "
+                f"Click **📊 My Dashboard** anytime to refresh it."
             ),
-            color=discord.Color.dark_green(),
+            already_deferred=True,
         )
-        welcome.set_footer(text="No limits — just invite and earn! 💸")
-        try:
-            await safe_api_call(channel.send(embed=welcome))
-        except Exception as e:
-            logger.error(f"Welcome embed failed for {uid}: {e}")
 
-        # Send initial dashboard
-        await send_dashboard_update(user, guild)
-
-        await interaction.followup.send(
-            "✅ You're in! Check your private channel for your dashboard & invite link! 🎉",
-            ephemeral=True,
-        )
         log_ch = guild.get_channel(LOG_CHANNEL_ID)
         if log_ch:
             await safe_api_call(log_ch.send(
                 f"📢 **New Affiliate** | {user.name} ({uid}) joined! Invite: {invite.url}"
             ))
 
-    @discord.ui.button(label="My Dashboard", style=discord.ButtonStyle.blurple,
-                       emoji="📊", custom_id="affiliate:dashboard")
+    @discord.ui.button(
+        label="My Dashboard",
+        style=discord.ButtonStyle.blurple,
+        emoji="📊",
+        custom_id="affiliate:dashboard",
+    )
     async def view_dashboard(self, interaction: discord.Interaction, button: discord.ui.Button):
         user  = interaction.user
         guild = interaction.guild
@@ -515,22 +435,24 @@ class AffiliateButtons(discord.ui.View):
         if guild.id != GUILD_ID:
             await interaction.response.send_message("❌ Wrong server!", ephemeral=True)
             return
-        await interaction.response.defer(ephemeral=True)
 
         if not await is_affiliate(gid, uid):
-            await interaction.followup.send(
-                "❌ You're not in the Affiliate Program yet! Click **Start Affiliate Program** first.",
+            await interaction.response.send_message(
+                "❌ You're not in the Affiliate Program yet!\n"
+                "Click **🚀 Start Affiliate Program** to join.",
                 ephemeral=True,
             )
             return
 
-        await send_dashboard_update(user, guild)
-        await interaction.followup.send(
-            "✅ Dashboard updated in your private channel!", ephemeral=True
-        )
+        # Show dashboard — only this user sees it
+        await send_ephemeral_dashboard(interaction)
 
-    @discord.ui.button(label="Stop Affiliate Program", style=discord.ButtonStyle.red,
-                       emoji="🛑", custom_id="affiliate:stop")
+    @discord.ui.button(
+        label="Stop Affiliate Program",
+        style=discord.ButtonStyle.red,
+        emoji="🛑",
+        custom_id="affiliate:stop",
+    )
     async def stop_affiliate(self, interaction: discord.Interaction, button: discord.ui.Button):
         user  = interaction.user
         guild = interaction.guild
@@ -540,29 +462,17 @@ class AffiliateButtons(discord.ui.View):
         if guild.id != GUILD_ID:
             await interaction.response.send_message("❌ Wrong server!", ephemeral=True)
             return
+
         await interaction.response.defer(ephemeral=True)
 
         if not await is_affiliate(gid, uid):
             await interaction.followup.send(
-                "❌ You're not in the Affiliate Program! Click **Start** to join.", ephemeral=True
+                "❌ You're not in the Affiliate Program! Click **Start** to join.",
+                ephemeral=True,
             )
             return
 
-        cid = await get_channel(gid, uid)
-        ch  = guild.get_channel(int(cid)) if cid else None
-        if ch:
-            try:
-                await safe_api_call(ch.send(
-                    f"👋 {user.mention}, Affiliate Program stopped. Come back anytime!"
-                ))
-                await safe_api_call(ch.delete())
-            except Exception as e:
-                logger.error(f"Channel delete failed for {uid}: {e}")
-                await interaction.followup.send(
-                    "❌ Can't delete your channel! Ask an admin to fix permissions!", ephemeral=True
-                )
-                return
-
+        # Remove Affiliater role
         aff_role = guild.get_role(AFFILIATER_ROLE_ID)
         if aff_role and aff_role in user.roles:
             try:
@@ -572,6 +482,7 @@ class AffiliateButtons(discord.ui.View):
 
         await delete_affiliate_data(gid, uid)
 
+        # Remove cached invite
         bot_obj: SobanBot = interaction.client
         bot_obj.invite_cache[gid] = {
             c: d for c, d in bot_obj.invite_cache.get(gid, {}).items()
@@ -583,8 +494,9 @@ class AffiliateButtons(discord.ui.View):
             await safe_api_call(log_ch.send(
                 f"📢 **Left Affiliate** | {user.name} ({uid}) stopped the program."
             ))
+
         await interaction.followup.send(
-            "✅ Affiliate Program stopped. Your private channel has been removed. Start again anytime!",
+            "✅ You've left the Affiliate Program. Come back anytime!",
             ephemeral=True,
         )
 
@@ -598,7 +510,7 @@ class AdminButtons(discord.ui.View):
         rem = check_cooldown(uid)
         if rem > 0:
             await interaction.response.send_message(
-                f"⏳ Please wait **{rem:.1f}s** before clicking again!", ephemeral=True
+                f"⏳ Please wait **{rem:.1f}s**!", ephemeral=True
             )
             return False
         _cooldowns[uid] = time.time()
@@ -612,11 +524,11 @@ class AdminButtons(discord.ui.View):
         if not is_admin(user, guild):
             await interaction.response.send_message("❌ No permission!", ephemeral=True)
             return
-        await interaction.response.send_message(
-            "🔢 Enter the **User ID** to reset their balance:", ephemeral=True
-        )
+        await interaction.response.send_message("🔢 Enter the **User ID**:", ephemeral=True)
+
         def check(m: discord.Message) -> bool:
             return m.author.id == user.id and m.channel.id == interaction.channel_id
+
         try:
             msg = await interaction.client.wait_for('message', check=check, timeout=30.0)
         except asyncio.TimeoutError:
@@ -644,23 +556,21 @@ class AdminButtons(discord.ui.View):
         if not rows:
             await interaction.response.send_message("No users with balances!", ephemeral=True)
             return
-        options = []
-        for uid, bal in rows[:25]:
-            m = guild.get_member(int(uid))
-            options.append(discord.SelectOption(
-                label=m.name if m else f"User {uid}",
+        options = [
+            discord.SelectOption(
+                label=guild.get_member(int(uid)).display_name if guild.get_member(int(uid)) else f"User {uid}",
                 value=uid,
                 description=f"Balance: ${bal:.2f}",
-            ))
-        select = discord.ui.Select(placeholder="Select a user to reset", options=options)
+            )
+            for uid, bal in rows[:25]
+        ]
+        select = discord.ui.Select(placeholder="Select a user", options=options)
         async def callback(inter: discord.Interaction) -> None:
             await _reset_balance_action(inter, guild, user, select.values[0])
         select.callback = callback
         view = discord.ui.View()
         view.add_item(select)
-        await interaction.response.send_message(
-            "Select a user to reset their balance:", view=view, ephemeral=True
-        )
+        await interaction.response.send_message("Select a user:", view=view, ephemeral=True)
 
     @discord.ui.button(label="View All Balances", style=discord.ButtonStyle.grey,
                        emoji="📋", custom_id="admin:list_balances")
@@ -676,20 +586,19 @@ class AdminButtons(discord.ui.View):
             'SELECT user_id, balance FROM balances WHERE guild_id=? ORDER BY balance DESC', (gid,)
         )
         if not rows:
-            await interaction.followup.send("No balances recorded yet.", ephemeral=True)
+            await interaction.followup.send("No balances yet.", ephemeral=True)
             return
         embed = discord.Embed(
             title="💰 All Affiliate Balances",
             color=discord.Color.gold(),
-            timestamp=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5))),
+            timestamp=pkt_now(),
         )
         lines = []
         for i, (uid, bal) in enumerate(rows, 1):
             m = guild.get_member(int(uid))
-            name = m.display_name if m else f"ID {uid}"
-            lines.append(f"`{i:02}.` **{name}** — ${bal:.2f}")
+            lines.append(f"`{i:02}.` **{m.display_name if m else uid}** — ${bal:.2f}")
         embed.description = "\n".join(lines)
-        embed.set_footer(text="Admin view • Pakistan Standard Time")
+        embed.set_footer(text="Admin view")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
@@ -709,19 +618,22 @@ async def _reset_balance_action(
         await interaction.response.send_message(msg, ephemeral=True)
     except discord.errors.InteractionResponded:
         await interaction.followup.send(msg, ephemeral=True)
+
     log_ch = guild.get_channel(LOG_CHANNEL_ID)
     if log_ch:
         await safe_api_call(log_ch.send(
             f"📢 **Balance Reset** | Admin {admin.name} reset {mention} "
             f"balance to $0.00 (was ${old_balance:.2f})"
         ))
-    cid = await get_channel(gid, target_uid)
-    if cid:
-        ch = guild.get_channel(int(cid))
-        if ch:
-            await safe_api_call(ch.send(
-                "⚠️ Your balance has been reset to **$0.00** by an admin."
-            ))
+
+    # DM the target user
+    if target:
+        try:
+            await target.send(
+                f"⚠️ Your affiliate balance in **{guild.name}** has been reset to **$0.00** by an admin."
+            )
+        except discord.errors.Forbidden:
+            pass
 
 # ---------------------------------------------------------------------------
 # Bot class
@@ -746,7 +658,7 @@ class SobanBot(commands.AutoShardedBot):
     async def on_ready(self) -> None:
         guild = self.get_guild(GUILD_ID)
         if guild:
-            logger.info(f"Connected to guild: {guild.name} ({guild.id})")
+            logger.info(f"Connected: {guild.name} ({guild.id})")
             try:
                 invites = await safe_api_call(guild.invites())
                 gid     = str(guild.id)
@@ -761,26 +673,29 @@ class SobanBot(commands.AutoShardedBot):
             except Exception as e:
                 logger.error(f"Invite cache failed: {e}")
 
-            # Post affiliate panel
+            # Affiliate panel
             ch = self.get_channel(CHALLENGE_CHANNEL_ID)
             if ch:
                 try:
+                    pkg_lines = []
+                    for rid, price in PREMIUM_ROLE_PRICES.items():
+                        role = guild.get_role(rid)
+                        rname = role.name if role else str(rid)
+                        pkg_lines.append(
+                            f"• **{rname}**: ${price:.2f}/mo → you earn **${price*0.5:.2f}**"
+                        )
                     embed = discord.Embed(
                         title="💸 Affiliate Program — Earn 50% Commission",
                         description=(
-                            "Invite people to this server and earn **50% commission** every time "
-                            "someone you invited buys or renews a Premium Package!\n\n"
+                            "Invite people to this server and earn **50% commission** "
+                            "every time someone you invited buys or renews a Premium Package!\n\n"
                             "**How it works:**\n"
-                            "1️⃣ Click **Start Affiliate Program** below\n"
-                            "2️⃣ Get your unique referral invite link\n"
-                            "3️⃣ Share it — when your invites buy premium, **you earn 50%**\n"
-                            "4️⃣ Track everything on your personal **📊 Dashboard**\n\n"
-                            "**Premium Packages:**\n"
-                            + "\n".join(
-                                f"• {guild.get_role(rid).name if guild.get_role(rid) else rid}: "
-                                f"${price:.2f}/mo → you earn **${price*0.5:.2f}**"
-                                for rid, price in PREMIUM_ROLE_PRICES.items()
-                            )
+                            "1️⃣ Click **🚀 Start Affiliate Program** below\n"
+                            "2️⃣ You'll instantly see your personal dashboard & referral link "
+                            "*(only visible to you)*\n"
+                            "3️⃣ Share your link — when your invites buy premium, **you earn 50%**\n"
+                            "4️⃣ Click **📊 My Dashboard** anytime to check your stats\n\n"
+                            "**Premium Packages:**\n" + "\n".join(pkg_lines)
                         ),
                         color=discord.Color.dark_green(),
                     )
@@ -789,15 +704,15 @@ class SobanBot(commands.AutoShardedBot):
                 except Exception as e:
                     logger.error(f"Affiliate embed failed: {e}")
 
-            # Post admin panel
+            # Admin panel
             log_ch = self.get_channel(LOG_CHANNEL_ID)
             if log_ch:
                 try:
                     admin_embed = discord.Embed(
                         title="🛡️ Admin Control Panel",
                         description=(
-                            "Use the buttons below to manage affiliate balances.\n"
-                            "You can also use `!resetbalance @user` or `!listbalances` in this channel."
+                            "Manage affiliate balances with the buttons below.\n"
+                            "Commands: `!resetbalance @user` | `!listbalances` | `!dashboard @user`"
                         ),
                         color=discord.Color.red(),
                     )
@@ -831,18 +746,29 @@ class SobanBot(commands.AutoShardedBot):
                     inviter = guild.get_member(int(uid))
                     if inviter:
                         await update_invited_member(gid, str(member.id), uid)
-                        event_text = (
-                            f"👤 **New Invite!** {member.mention} just joined using your link!\n"
-                            f"Total invites: **{new_uses}**"
+                        # DM the inviter about the new invite
+                        embed = discord.Embed(
+                            title="👥 New Invite!",
+                            description=(
+                                f"**{member.display_name}** just joined using your referral link!\n\n"
+                                f"📊 Total invites: **{new_uses}**\n"
+                                f"💰 Balance: **${await get_balance(gid, uid):.2f}**\n\n"
+                                f"Click **📊 My Dashboard** in the server to see full stats."
+                            ),
+                            color=discord.Color.dark_green(),
+                            timestamp=pkt_now(),
                         )
-                        asyncio.create_task(
-                            send_dashboard_update(inviter, guild, event_text)
-                        )
+                        embed.set_footer(text="Soban Affiliate Program")
+                        try:
+                            await inviter.send(embed=embed)
+                        except discord.errors.Forbidden:
+                            logger.info(f"Cannot DM {uid}")
+
                         log_ch = guild.get_channel(LOG_CHANNEL_ID)
                         if log_ch:
                             asyncio.create_task(safe_api_call(log_ch.send(
                                 f"📢 **New Invite** | {inviter.name} → {member.name} joined. "
-                                f"Total: {new_uses} invites"
+                                f"Total: {new_uses}"
                             )))
                     matched = True
                     break
@@ -865,7 +791,7 @@ class SobanBot(commands.AutoShardedBot):
                     inviter = after.guild.get_member(int(inviter_id))
                     if inviter:
                         asyncio.create_task(
-                            notify_commission(inviter, after, role.id, after.guild)
+                            notify_commission_dm(inviter, after, role.id, after.guild)
                         )
 
     async def on_command(self, ctx: commands.Context) -> None:
@@ -885,7 +811,6 @@ class SobanBot(commands.AutoShardedBot):
 
     @tasks.loop(hours=24)
     async def recurring_commission_check(self) -> None:
-        """Monthly renewal commission check — runs daily."""
         guild = self.get_guild(GUILD_ID)
         if not guild:
             return
@@ -906,7 +831,7 @@ class SobanBot(commands.AutoShardedBot):
                 continue
             inviter = guild.get_member(int(inviter_id))
             if inviter:
-                await notify_commission(inviter, member, int(role_id), guild)
+                await notify_commission_dm(inviter, member, int(role_id), guild)
                 await record_role_purchase(gid, member_id, role_id, now)
 
     @recurring_commission_check.before_loop
@@ -923,32 +848,28 @@ bot = SobanBot()
 @bot.command()
 async def resetbalance(ctx: commands.Context, member: discord.Member) -> None:
     if ctx.guild.id != GUILD_ID:
-        await ctx.send("❌ This command only works in the specified server!")
         return
     if ctx.channel.id != LOG_CHANNEL_ID:
-        await ctx.send("❌ This command can only be used in the log channel!", delete_after=5)
+        await ctx.send("❌ Only usable in the log channel!", delete_after=5)
         return
     if not is_admin(ctx.author, ctx.guild):
-        await ctx.send("❌ You don't have permission!")
+        await ctx.send("❌ No permission!")
         return
     gid         = str(ctx.guild.id)
-    target_id   = str(member.id)
-    old_balance = await get_balance(gid, target_id)
-    await update_balance(gid, target_id, 0.0)
-    await ctx.send(f"✅ Balance for {member.mention} reset to **$0.00** (was **${old_balance:.2f}**)!")
-    cid = await get_channel(gid, target_id)
-    if cid:
-        ch = ctx.guild.get_channel(int(cid))
-        if ch:
-            await safe_api_call(ch.send(
-                "⚠️ Your balance has been reset to **$0.00** by an admin."
-            ))
+    old_balance = await get_balance(gid, str(member.id))
+    await update_balance(gid, str(member.id), 0.0)
+    await ctx.send(f"✅ {member.mention} balance reset to $0.00 (was ${old_balance:.2f})")
+    try:
+        await member.send(
+            f"⚠️ Your affiliate balance in **{ctx.guild.name}** has been reset to **$0.00** by an admin."
+        )
+    except discord.errors.Forbidden:
+        pass
 
 
 @bot.command()
 async def checkinvites(ctx: commands.Context) -> None:
     if ctx.guild.id != GUILD_ID:
-        await ctx.send("❌ This command only works in the specified server!")
         return
     gid     = str(ctx.guild.id)
     uid     = str(ctx.author.id)
@@ -957,140 +878,94 @@ async def checkinvites(ctx: commands.Context) -> None:
     embed = discord.Embed(
         title="📊 Your Affiliate Stats",
         color=discord.Color.dark_green(),
-        timestamp=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5))),
+        timestamp=pkt_now(),
     )
     embed.set_author(name=ctx.author.display_name, icon_url=ctx.author.display_avatar.url)
-    embed.add_field(name="👥 Total Invites", value=f"```{invites}```", inline=True)
-    embed.add_field(name="💰 Balance", value=f"```${balance:.2f}```", inline=True)
-    embed.set_footer(text="Use !checkbalance to see full balance info")
-    await safe_api_call(ctx.send(embed=embed))
+    embed.add_field(name="👥 Invites",  value=f"```{invites}```",    inline=True)
+    embed.add_field(name="💰 Balance",  value=f"```${balance:.2f}```", inline=True)
+    embed.set_footer(text="Click 📊 My Dashboard in the affiliate panel for full stats")
+    await ctx.send(embed=embed)
 
 
 @bot.command()
 async def checkbalance(ctx: commands.Context) -> None:
     if ctx.guild.id != GUILD_ID:
-        await ctx.send("❌ This command only works in the specified server!")
         return
     balance = await get_balance(str(ctx.guild.id), str(ctx.author.id))
     embed = discord.Embed(
         title="💰 Your Affiliate Balance",
         description=(
-            f"Hey {ctx.author.mention}!\n\n"
             f"**Current Balance:** `${balance:.2f}`\n\n"
             f"Contact an admin to claim your earnings! 🚀"
         ),
         color=discord.Color.dark_green(),
     )
-    embed.set_footer(text="Earn more by inviting! 💸")
-    await safe_api_call(ctx.send(embed=embed))
+    await ctx.send(embed=embed)
 
 
 @bot.command()
 async def leaderboard(ctx: commands.Context) -> None:
     if ctx.guild.id != GUILD_ID:
-        await ctx.send("❌ This command only works in the specified server!")
         return
     rows = await _fetchall(
         'SELECT user_id, invite_count FROM invites WHERE guild_id=? ORDER BY invite_count DESC LIMIT 10',
         (str(ctx.guild.id),)
     )
+    medals = ["🥇", "🥈", "🥉"]
     embed = discord.Embed(
         title="🏆 Affiliate Leaderboard",
         color=discord.Color.gold(),
-        timestamp=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5))),
+        timestamp=pkt_now(),
     )
-    medals = ["🥇", "🥈", "🥉"]
     lines = []
     for idx, (uid, inv_count) in enumerate(rows, 1):
         m   = ctx.guild.get_member(int(uid))
         bal = await get_balance(str(ctx.guild.id), uid)
         medal = medals[idx-1] if idx <= 3 else f"`{idx:02}.`"
-        name = m.display_name if m else f"User {uid}"
-        lines.append(f"{medal} **{name}** — {inv_count} invites | ${bal:.2f}")
-    embed.description = "\n".join(lines) if lines else "No invites yet! Start inviting! 🚀"
+        lines.append(f"{medal} **{m.display_name if m else uid}** — {inv_count} invites | ${bal:.2f}")
+    embed.description = "\n".join(lines) if lines else "No invites yet!"
     embed.set_footer(text="Invite more to climb the ranks!")
-    await safe_api_call(ctx.send(embed=embed))
+    await ctx.send(embed=embed)
 
 
 @bot.command()
 async def listbalances(ctx: commands.Context) -> None:
     if ctx.guild.id != GUILD_ID:
-        await ctx.send("❌ This command only works in the specified server!")
         return
     if not is_admin(ctx.author, ctx.guild):
-        await ctx.send("❌ You don't have permission!")
+        await ctx.send("❌ No permission!")
         return
     rows = await _fetchall(
         'SELECT user_id, balance FROM balances WHERE guild_id=? ORDER BY balance DESC',
         (str(ctx.guild.id),)
     )
     if not rows:
-        await ctx.send("No balances recorded yet!")
+        await ctx.send("No balances yet.")
         return
-    embed = discord.Embed(
-        title="💰 All Affiliate Balances",
-        color=discord.Color.blue(),
-        timestamp=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=5))),
-    )
-    lines = []
-    for i, (uid, bal) in enumerate(rows, 1):
-        m = ctx.guild.get_member(int(uid))
-        name = m.display_name if m else f"ID {uid}"
-        lines.append(f"`{i:02}.` **{name}** — ${bal:.2f}")
+    embed = discord.Embed(title="💰 All Balances", color=discord.Color.blue(), timestamp=pkt_now())
+    lines = [
+        f"`{i:02}.` **{ctx.guild.get_member(int(uid)).display_name if ctx.guild.get_member(int(uid)) else uid}** — ${bal:.2f}"
+        for i, (uid, bal) in enumerate(rows, 1)
+    ]
     embed.description = "\n".join(lines)
-    embed.set_footer(text="Admin view")
-    await safe_api_call(ctx.send(embed=embed))
-
-
-@bot.command()
-async def dashboard(ctx: commands.Context) -> None:
-    if ctx.guild.id != GUILD_ID:
-        await ctx.send("❌ This command only works in the specified server!")
-        return
-    gid = str(ctx.guild.id)
-    uid = str(ctx.author.id)
-    if not await is_affiliate(gid, uid):
-        await ctx.send("❌ You're not in the Affiliate Program yet!")
-        return
-    await send_dashboard_update(ctx.author, ctx.guild)
-    await ctx.send("✅ Dashboard updated in your private channel!", delete_after=5)
+    await ctx.send(embed=embed)
 
 
 @bot.command()
 async def checkchannel(ctx: commands.Context) -> None:
+    """Now just tells user to use the dashboard button."""
     if ctx.guild.id != GUILD_ID:
-        await ctx.send("❌ This command only works in the specified server!")
         return
-    gid = str(ctx.guild.id)
-    uid = str(ctx.author.id)
-    cid = await get_channel(gid, uid)
-    if not cid:
-        await ctx.send("No private channel yet! Click **Start Affiliate Program** to get started!")
-        return
-    ch = ctx.guild.get_channel(int(cid))
-    if not ch:
-        await ctx.send("Your channel is missing! Click **Start Affiliate Program** to create a new one!")
-        return
-    perms = ch.permissions_for(ctx.author)
-    if perms.read_messages and perms.send_messages:
-        await ctx.send(f"✅ Your private channel: {ch.mention}")
-    else:
-        try:
-            await safe_api_call(ch.set_permissions(
-                ctx.author,
-                read_messages=True, read_message_history=True,
-                send_messages=True, attach_files=True, send_voice_messages=True,
-            ))
-            await ctx.send(f"✅ Permissions fixed! Check {ch.mention} now!")
-        except Exception as e:
-            logger.error(f"Permission fix failed for {uid}: {e}")
-            await ctx.send("❌ Couldn't fix permissions! Ask an admin to help!")
+    await ctx.send(
+        "ℹ️ There are no private channels anymore.\n"
+        "Click **📊 My Dashboard** in the affiliate panel to see your stats!",
+        delete_after=15,
+    )
 
 
 @bot.command()
 async def roast(ctx: commands.Context, member: discord.Member = None) -> None:
     if ctx.guild.id != GUILD_ID:
-        await ctx.send("❌ This command only works in the specified server!")
         return
     if not member:
         await ctx.send("Who do you want to roast? Tag someone! 😜")
@@ -1102,7 +977,7 @@ async def roast(ctx: commands.Context, member: discord.Member = None) -> None:
         "{user}, bhai invite link share karo, ya ghar baith ke Netflix dekho! 😂",
         "{user}, itni slow progress ke sath tum tortoise bhi race jeet lo! 🐢",
     ]
-    await safe_api_call(ctx.send(random.choice(roasts).format(user=member.mention)))
+    await ctx.send(random.choice(roasts).format(user=member.mention))
 
 
 # ---------------------------------------------------------------------------
