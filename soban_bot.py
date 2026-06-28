@@ -38,10 +38,16 @@ LOG_CHANNEL_ID       = 1388138273834012682
 ADMIN_ROLE_ID        = 1376921339994181734
 AFFILIATER_ROLE_ID   = 1404007129593020520
 
-PREMIUM_ROLE_PRICES: dict[int, float] = {
-    1404040571018023024: 8.0,    # premium
-    1387177079270805645: 35.0,   # elite
+# role_id → (price_usd, commission_usd, display_name)
+PREMIUM_PACKAGES: dict[int, tuple[float, float, str]] = {
+    1404040571018023024: (10.0,  4.0,  "PREMIUM 👑"),
+    1387177079270805645: (15.0,  6.0,  "ELITE 👑"),
+    0000000000000000001: (10.0,  4.0,  "FOREX BOT 👑"),   # <-- FOREX BOT role ID daalo
+    0000000000000000002: (10.0,  4.0,  "CRYPTO BOT 👑"),  # <-- CRYPTO BOT role ID daalo
 }
+
+# Affiliate panel image — apni marzi ki image URL yahan daalo
+AFFILIATE_BANNER_URL = "https://i.imgur.com/4M34hi2.png"
 
 DB_FILE          = 'bot_data.db'
 COOLDOWN_SECONDS = 5
@@ -201,7 +207,7 @@ async def build_dashboard_embed(
     commissions = await get_all_commissions(gid, uid)
 
     monthly_potential = sum(
-        PREMIUM_ROLE_PRICES.get(int(role_id), 0.0) * 0.5
+        PREMIUM_PACKAGES.get(int(role_id), (0, 0, ''))[1]
         for role_id, _ in commissions
     )
 
@@ -225,7 +231,7 @@ async def build_dashboard_embed(
     embed.add_field(name="💰 Total Earned",      value=f"```${balance:.2f}```",           inline=True)
     embed.add_field(name="🔄 Monthly Est.",      value=f"```${monthly_potential:.2f}```", inline=True)
     embed.add_field(name="📦 Packages Sold",     value=f"```{len(commissions)}```",       inline=True)
-    embed.add_field(name="💵 Commission Rate",   value="```50%```",                       inline=True)
+    embed.add_field(name="💵 Commission Rate",   value="```40%```",                       inline=True)
 
     if invite_url:
         embed.add_field(
@@ -235,10 +241,8 @@ async def build_dashboard_embed(
         )
 
     pkg_lines = []
-    for role_id, price in PREMIUM_ROLE_PRICES.items():
-        role = guild.get_role(role_id)
-        name = role.name if role else f"Role {role_id}"
-        pkg_lines.append(f"• **{name}**: ${price:.2f}/mo → you earn **${price*0.5:.2f}**")
+    for role_id, (price, commission, pkg_name) in PREMIUM_PACKAGES.items():
+        pkg_lines.append(f"• **{pkg_name}**: ${price:.2f}/mo → you earn **${commission:.2f}**")
     embed.add_field(
         name="📋 Commission Structure",
         value="\n".join(pkg_lines),
@@ -288,9 +292,8 @@ async def notify_commission_dm(
         return
 
     role       = guild.get_role(role_id)
-    role_name  = role.name if role else f"Role {role_id}"
-    price      = PREMIUM_ROLE_PRICES.get(role_id, 0.0)
-    commission = price * 0.5
+    pkg        = PREMIUM_PACKAGES.get(role_id, (0.0, 0.0, f"Role {role_id}"))
+    price, commission, role_name = pkg[0], pkg[1], pkg[2]
     current    = await get_balance(gid, iid)
     await update_balance(gid, iid, current + commission)
     await record_role_purchase(gid, str(new_member.id), str(role_id), int(time.time()))
@@ -301,7 +304,7 @@ async def notify_commission_dm(
         title="💸 Commission Earned!",
         description=(
             f"**{new_member.display_name}** just bought **{role_name}**!\n\n"
-            f"💰 You earned: **${commission:.2f}** (50% of ${price:.2f})\n"
+            f"💰 You earned: **${commission:.2f}** commission\n"
             f"💼 New balance: **${new_bal:.2f}**\n\n"
             f"Contact an admin in **{guild.name}** to claim your earnings!"
         ),
@@ -447,58 +450,6 @@ class AffiliateButtons(discord.ui.View):
         # Show dashboard — only this user sees it
         await send_ephemeral_dashboard(interaction)
 
-    @discord.ui.button(
-        label="Stop Affiliate Program",
-        style=discord.ButtonStyle.red,
-        emoji="🛑",
-        custom_id="affiliate:stop",
-    )
-    async def stop_affiliate(self, interaction: discord.Interaction, button: discord.ui.Button):
-        user  = interaction.user
-        guild = interaction.guild
-        gid   = str(guild.id)
-        uid   = str(user.id)
-
-        if guild.id != GUILD_ID:
-            await interaction.response.send_message("❌ Wrong server!", ephemeral=True)
-            return
-
-        await interaction.response.defer(ephemeral=True)
-
-        if not await is_affiliate(gid, uid):
-            await interaction.followup.send(
-                "❌ You're not in the Affiliate Program! Click **Start** to join.",
-                ephemeral=True,
-            )
-            return
-
-        # Remove Affiliater role
-        aff_role = guild.get_role(AFFILIATER_ROLE_ID)
-        if aff_role and aff_role in user.roles:
-            try:
-                await safe_api_call(user.remove_roles(aff_role))
-            except Exception as e:
-                logger.error(f"Role remove error for {uid}: {e}")
-
-        await delete_affiliate_data(gid, uid)
-
-        # Remove cached invite
-        bot_obj: SobanBot = interaction.client
-        bot_obj.invite_cache[gid] = {
-            c: d for c, d in bot_obj.invite_cache.get(gid, {}).items()
-            if d['inviter_id'] != uid
-        }
-
-        log_ch = guild.get_channel(LOG_CHANNEL_ID)
-        if log_ch:
-            await safe_api_call(log_ch.send(
-                f"📢 **Left Affiliate** | {user.name} ({uid}) stopped the program."
-            ))
-
-        await interaction.followup.send(
-            "✅ You've left the Affiliate Program. Come back anytime!",
-            ephemeral=True,
-        )
 
 
 class AdminButtons(discord.ui.View):
@@ -677,28 +628,25 @@ class SobanBot(commands.AutoShardedBot):
             ch = self.get_channel(CHALLENGE_CHANNEL_ID)
             if ch:
                 try:
-                    pkg_lines = []
-                    for rid, price in PREMIUM_ROLE_PRICES.items():
-                        role = guild.get_role(rid)
-                        rname = role.name if role else str(rid)
-                        pkg_lines.append(
-                            f"• **{rname}**: ${price:.2f}/mo → you earn **${price*0.5:.2f}**"
-                        )
+                    pkg_lines = [
+                        f"• **{pkg_name}**: ${price:.2f}/mo → you earn **${commission:.2f}**"
+                        for _, (price, commission, pkg_name) in PREMIUM_PACKAGES.items()
+                    ]
                     embed = discord.Embed(
-                        title="💸 Affiliate Program — Earn 50% Commission",
+                        title="💸 Affiliate Program — Earn Commission",
                         description=(
-                            "Invite people to this server and earn **50% commission** "
+                            "Invite people to this server and earn commission "
                             "every time someone you invited buys or renews a Premium Package!\n\n"
                             "**How it works:**\n"
                             "1️⃣ Click **🚀 Start Affiliate Program** below\n"
-                            "2️⃣ You'll instantly see your personal dashboard & referral link "
-                            "*(only visible to you)*\n"
-                            "3️⃣ Share your link — when your invites buy premium, **you earn 50%**\n"
-                            "4️⃣ Click **📊 My Dashboard** anytime to check your stats\n\n"
+                            "2️⃣ Get your unique referral invite link\n"
+                            "3️⃣ Share it — when your invites buy premium, **you earn commission**\n"
+                            "4️⃣ Track everything on your personal **📊 Dashboard**\n\n"
                             "**Premium Packages:**\n" + "\n".join(pkg_lines)
                         ),
                         color=discord.Color.dark_green(),
                     )
+                    embed.set_image(url=AFFILIATE_BANNER_URL)
                     embed.set_footer(text="No limits — invite more, earn more! 🚀")
                     await safe_api_call(ch.send(embed=embed, view=AffiliateButtons()))
                 except Exception as e:
@@ -785,7 +733,7 @@ class SobanBot(commands.AutoShardedBot):
         member_id = str(after.id)
         new_roles = set(after.roles) - set(before.roles)
         for role in new_roles:
-            if role.id in PREMIUM_ROLE_PRICES:
+            if role.id in PREMIUM_PACKAGES:
                 inviter_id = await get_inviter(gid, member_id)
                 if inviter_id:
                     inviter = after.guild.get_member(int(inviter_id))
