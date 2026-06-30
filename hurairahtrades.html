@@ -463,6 +463,122 @@ footer::before{
   *{animation:none!important;transition:none!important;scroll-behavior:auto!important}
   .streak{display:none}
 }
+
+/* ===== ABOUT SECTION ===== */
+.about-section{margin:10px 0 0}
+.about-card{
+  background:var(--surface);
+  border:1px solid var(--border-soft);
+  border-radius:20px;padding:28px 22px;
+  position:relative;overflow:hidden;
+  backdrop-filter:blur(12px);
+}
+.about-card::before{
+  content:"";position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(201,168,76,.5),transparent);
+}
+.about-card::after{
+  content:"";position:absolute;top:-60px;right:-60px;
+  width:200px;height:200px;border-radius:50%;
+  background:radial-gradient(circle,rgba(201,168,76,.05),transparent 70%);
+  pointer-events:none;
+}
+.about-header{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+.about-dot{width:7px;height:7px;border-radius:50%;background:var(--gold);box-shadow:0 0 8px var(--gold)}
+.about-label{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted2)}
+.about-title{font-family:'Anton',sans-serif;font-weight:400;font-size:clamp(22px,6vw,30px);line-height:1.1;text-transform:uppercase;color:var(--cream);margin-bottom:16px}
+.about-gold{background:linear-gradient(90deg,var(--gold-light),var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent}
+.about-body{color:#9aa0b8;font-size:14.5px;line-height:1.75}
+.about-body b{color:var(--cream);font-weight:600}
+.about-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.tag{
+  font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;
+  color:var(--gold);border:1px solid rgba(201,168,76,.2);
+  background:rgba(201,168,76,.06);
+  padding:5px 12px;border-radius:99px;text-transform:uppercase;
+}
+
+/* ===== GOAT CONCEPT ===== */
+.goat-section{margin:44px 0 0}
+.goat-eyebrow{display:flex;align-items:center;gap:14px;margin-bottom:20px}
+.goat-line{flex:1;height:1px;background:linear-gradient(90deg,transparent,rgba(201,168,76,.25),transparent)}
+.goat-eyebrow span{font-family:'JetBrains Mono',monospace;font-size:9.5px;letter-spacing:.28em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.goat-heading{font-family:'Anton',sans-serif;font-weight:400;font-size:clamp(30px,9vw,44px);line-height:1;text-transform:uppercase;color:var(--cream);margin-bottom:12px;text-align:center}
+.goat-gold{background:linear-gradient(90deg,var(--gold),var(--gold-light));-webkit-background-clip:text;background-clip:text;color:transparent}
+.goat-sub{font-size:14px;color:var(--muted2);text-align:center;max-width:340px;margin:0 auto 28px;line-height:1.7}
+.concept-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.concept-card{
+  background:var(--surface);
+  border:1px solid var(--border-soft);
+  border-radius:16px;padding:18px 16px;
+  position:relative;overflow:hidden;
+  transition:border-color .2s,transform .2s,box-shadow .2s;
+}
+.concept-card:hover{border-color:rgba(201,168,76,.2);transform:translateY(-3px);box-shadow:0 16px 40px rgba(0,0,0,.5)}
+.concept-card::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(201,168,76,.35),transparent)}
+.concept-icon{font-size:14px;color:var(--gold);margin-bottom:10px;opacity:.7}
+.concept-title{font-weight:700;font-size:13.5px;color:var(--cream);margin-bottom:7px;letter-spacing:-.01em}
+.concept-desc{font-size:12px;color:var(--muted);line-height:1.65}
+
+/* ===== RESULTS STRIP ===== */
+.results-strip{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  gap:0;margin:36px 0;
+  background:var(--surface);
+  border:1px solid var(--border-soft);
+  border-radius:18px;overflow:hidden;
+  position:relative;
+}
+.results-strip::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(201,168,76,.4),transparent)}
+.result-item{padding:20px 8px;text-align:center;position:relative}
+.result-num{font-family:'Anton',sans-serif;font-size:24px;letter-spacing:.02em;background:linear-gradient(170deg,#fff,var(--gold));-webkit-background-clip:text;background-clip:text;color:transparent;line-height:1}
+.result-plus{font-size:14px;vertical-align:top;margin-top:4px;display:inline-block}
+.result-unit{font-size:13px;letter-spacing:.04em}
+.result-label{font-family:'JetBrains Mono',monospace;font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-top:6px}
+.result-divider{width:1px;background:var(--border-soft);margin:14px 0}
+
+/* ===== MENTORSHIP SECTION ===== */
+.mentor-section{
+  background:linear-gradient(145deg,#0a0c1a,#08111f);
+  border:1px solid var(--border);
+  border-radius:22px;padding:30px 22px;
+  position:relative;overflow:hidden;margin:0 0 8px;
+}
+.mentor-section::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(201,168,76,.5),transparent)}
+.mentor-section::after{content:"";position:absolute;top:-80px;left:50%;transform:translateX(-50%);width:300px;height:200px;background:radial-gradient(ellipse,rgba(0,87,183,.12),transparent 70%);pointer-events:none}
+.mentor-badge{
+  display:inline-block;
+  font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.22em;
+  color:var(--gold);border:1px solid rgba(201,168,76,.25);
+  background:rgba(201,168,76,.06);
+  padding:5px 14px;border-radius:99px;text-transform:uppercase;
+  margin-bottom:16px;position:relative;z-index:1;
+}
+.mentor-heading{font-family:'Anton',sans-serif;font-weight:400;font-size:clamp(26px,8vw,36px);text-transform:uppercase;color:var(--cream);margin-bottom:8px;position:relative;z-index:1}
+.mentor-sub{font-size:13.5px;color:var(--muted2);margin-bottom:24px;line-height:1.65;position:relative;z-index:1}
+.mentor-list{display:flex;flex-direction:column;gap:0;position:relative;z-index:1}
+.mentor-item{
+  display:flex;align-items:flex-start;gap:14px;
+  padding:14px 0;border-bottom:1px solid var(--border-soft);
+}
+.mentor-item:last-child{border-bottom:none;padding-bottom:0}
+.mentor-check{
+  width:26px;height:26px;border-radius:8px;flex:none;
+  background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.25);
+  display:grid;place-items:center;font-size:13px;color:var(--gold);
+  margin-top:1px;
+}
+.mentor-item-title{font-weight:600;font-size:14px;color:var(--cream);margin-bottom:3px}
+.mentor-item-desc{font-size:12.5px;color:var(--muted);line-height:1.6}
+
+@media(max-width:380px){
+  .concept-grid{grid-template-columns:1fr}
+  .results-strip{grid-template-columns:repeat(2,1fr)}
+  .result-divider{display:none}
+  .results-strip .result-item:nth-child(2){border-bottom:1px solid var(--border-soft)}
+  .results-strip .result-item:nth-child(4){border-bottom:none}
+}
+
 </style>
 </head>
 <body>
@@ -504,6 +620,132 @@ footer::before{
       <div class="stat"><div class="n">FREE</div><div class="l">10 Days Mentorship</div></div>
     </div>
   </section>
+  <!-- ===== ABOUT SECTION ===== -->
+  <section class="about-section">
+    <div class="about-card">
+      <div class="about-header">
+        <div class="about-dot"></div>
+        <span class="about-label">Who is Hurairah</span>
+      </div>
+      <h2 class="about-title">Pakistan's Most Recognised <span class="about-gold">Trading Voice</span></h2>
+      <p class="about-body">
+        Muhammad Hurayrah — known across Pakistan and beyond as the face of disciplined, concept-driven trading. With over <b>573,000 followers</b> on Instagram alone, he has built one of the most trusted trading communities in South Asia. His approach isn't about hype — it's about <b>proven structure, clean entries, and a mindset that separates professionals from gamblers.</b>
+      </p>
+      <p class="about-body" style="margin-top:12px">
+        From <b>Gold and Crypto</b> to <b>Forex and OTC</b> markets — Hurairah covers it all under one roof, entirely for free. No paid courses. No gatekeeping. Just raw, real trading education.
+      </p>
+      <div class="about-tags">
+        <span class="tag">&#9670; Gold</span>
+        <span class="tag">&#9670; Crypto</span>
+        <span class="tag">&#9670; Forex</span>
+        <span class="tag">&#9670; OTC</span>
+        <span class="tag">&#9670; Risk Management</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== GOAT CONCEPT SECTION ===== -->
+  <section class="goat-section">
+    <div class="goat-eyebrow">
+      <div class="goat-line"></div>
+      <span>The Methodology</span>
+      <div class="goat-line"></div>
+    </div>
+    <h2 class="goat-heading">What is the<br><span class="goat-gold">GOAT Concept?</span></h2>
+    <p class="goat-sub">A proprietary framework built for traders who want to read markets like institutions — not retail.</p>
+
+    <div class="concept-grid">
+      <div class="concept-card">
+        <div class="concept-icon">&#9724;</div>
+        <div class="concept-title">Market Structure</div>
+        <div class="concept-desc">Understanding how price creates highs, lows, and liquidity zones — the language of smart money.</div>
+      </div>
+      <div class="concept-card">
+        <div class="concept-icon">&#9724;</div>
+        <div class="concept-title">OTC & Crypto</div>
+        <div class="concept-desc">Proprietary OTC trading concept — updated regularly. Works across binary, crypto and gold markets.</div>
+      </div>
+      <div class="concept-card">
+        <div class="concept-icon">&#9724;</div>
+        <div class="concept-title">Clean Entry Points</div>
+        <div class="concept-desc">No guessing. No noise. The GOAT Concept gives you high-probability setups with defined risk.</div>
+      </div>
+      <div class="concept-card">
+        <div class="concept-icon">&#9724;</div>
+        <div class="concept-title">Risk Management</div>
+        <div class="concept-desc">How professionals protect capital — position sizing, drawdown rules, and the psychology of losing.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== RESULTS STRIP ===== -->
+  <section class="results-strip">
+    <div class="result-item">
+      <div class="result-num">573K<span class="result-plus">+</span></div>
+      <div class="result-label">Instagram Followers</div>
+    </div>
+    <div class="result-divider"></div>
+    <div class="result-item">
+      <div class="result-num">28<span class="result-unit">Lakh</span></div>
+      <div class="result-label">Profit From Trading</div>
+    </div>
+    <div class="result-divider"></div>
+    <div class="result-item">
+      <div class="result-num">10<span class="result-unit">Days</span></div>
+      <div class="result-label">Free Mentorship</div>
+    </div>
+    <div class="result-divider"></div>
+    <div class="result-item">
+      <div class="result-num">100<span class="result-plus">%</span></div>
+      <div class="result-label">Free. Always.</div>
+    </div>
+  </section>
+
+  <!-- ===== MENTORSHIP SECTION ===== -->
+  <section class="mentor-section">
+    <div class="mentor-badge">&#9733; FREE 10-DAY MENTORSHIP &#9733;</div>
+    <h2 class="mentor-heading">What You Get</h2>
+    <p class="mentor-sub">No fee. No catch. Just Hurairah's full trading system — handed to you directly.</p>
+    <div class="mentor-list">
+      <div class="mentor-item">
+        <div class="mentor-check">&#10003;</div>
+        <div>
+          <div class="mentor-item-title">The GOAT Concept — Full System</div>
+          <div class="mentor-item-desc">His complete proprietary framework, taught step by step over 10 days</div>
+        </div>
+      </div>
+      <div class="mentor-item">
+        <div class="mentor-check">&#10003;</div>
+        <div>
+          <div class="mentor-item-title">Live Gold &amp; Crypto Signals</div>
+          <div class="mentor-item-desc">Daily signals via Telegram — real entries, real exits, real results</div>
+        </div>
+      </div>
+      <div class="mentor-item">
+        <div class="mentor-check">&#10003;</div>
+        <div>
+          <div class="mentor-item-title">Forex &amp; OTC Trading</div>
+          <div class="mentor-item-desc">Learn to trade across multiple markets with one consistent concept</div>
+        </div>
+      </div>
+      <div class="mentor-item">
+        <div class="mentor-check">&#10003;</div>
+        <div>
+          <div class="mentor-item-title">Risk Management Masterclass</div>
+          <div class="mentor-item-desc">The #1 skill most traders ignore — how to never blow your account</div>
+        </div>
+      </div>
+      <div class="mentor-item">
+        <div class="mentor-check">&#10003;</div>
+        <div>
+          <div class="mentor-item-title">Trader Mindset &amp; Psychology</div>
+          <div class="mentor-item-desc">Discipline, patience, and the mental edge that separates winners from losers</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+
 
   <div class="eyebrow">Join the family</div>
   <a class="cta cta-primary" href="https://t.me/HurairahFreeTelegramChannel" target="_blank" rel="noopener"><span class="ic"><svg viewBox="0 0 24 24"><path d="M9.8 16.6l-.4 4.2c.5 0 .8-.2 1.1-.5l2.6-2.5 5.4 3.9c1 .5 1.7.3 1.9-.9l3.5-16.3c.3-1.4-.5-2-1.5-1.6L1.2 9.4C-.2 10 0 10.8 1.1 11.1l5.6 1.7L19.6 5c.6-.4 1.2-.2.7.2"/></svg></span><span class="tx">Free Telegram Channel<small>Daily signals + broadcast</small></span><span class="arrow">&rarr;</span></a>
