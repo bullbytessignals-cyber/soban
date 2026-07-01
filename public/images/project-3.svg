@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000" viewBox="0 0 800 1000">
+  <defs>
+    <linearGradient id="g-4" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#111111"/>
+      <stop offset="0.55" stop-color="#3a2a22"/>
+      <stop offset="1" stop-color="#111111"/>
+    </linearGradient>
+    <linearGradient id="s-4" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a211b"/>
+      <stop offset="1" stop-color="#171310"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="1000" fill="url(#g-4)"/>
+       <circle cx="640" cy="200" r="360" fill="#8C5A43" opacity="0.12"/>
+       <circle cx="120" cy="850" r="280" fill="#8C5A43" opacity="0.10"/>
+  <circle cx="400" cy="500" r="240" fill="none" stroke="#8C5A43" stroke-opacity="0.35" stroke-width="1.5"/>
+  
+  <text x="50%" y="50%" dominant-baseline="central" text-anchor="middle"
+         font-family="Georgia, 'Times New Roman', serif" font-size="176"
+         fill="#8C5A43" opacity="0.9" letter-spacing="2">AM</text>
+       <text x="50%" y="652" dominant-baseline="central" text-anchor="middle"
+         font-family="Georgia, serif" font-size="28.000000000000004"
+         fill="#F8F6F3" opacity="0.55" letter-spacing="6">FOUNDERS CIRCLE</text>
+</svg>

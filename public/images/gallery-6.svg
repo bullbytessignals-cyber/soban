@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1066" viewBox="0 0 800 1066">
+  <defs>
+    <linearGradient id="g-13" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a140f"/>
+      <stop offset="0.55" stop-color="#4a3628"/>
+      <stop offset="1" stop-color="#1a140f"/>
+    </linearGradient>
+    <linearGradient id="s-13" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a211b"/>
+      <stop offset="1" stop-color="#171310"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="1066" fill="url(#g-13)"/>
+       <circle cx="640" cy="213.20000000000002" r="360" fill="#C8A96A" opacity="0.12"/>
+       <circle cx="120" cy="906.1" r="280" fill="#C8A96A" opacity="0.10"/>
+  <circle cx="400" cy="533" r="240" fill="none" stroke="#C8A96A" stroke-opacity="0.35" stroke-width="1.5"/>
+  
+  <text x="50%" y="50%" dominant-baseline="central" text-anchor="middle"
+         font-family="Georgia, 'Times New Roman', serif" font-size="176"
+         fill="#C8A96A" opacity="0.9" letter-spacing="2">AM</text>
+       <text x="50%" y="685" dominant-baseline="central" text-anchor="middle"
+         font-family="Georgia, serif" font-size="28.000000000000004"
+         fill="#F8F6F3" opacity="0.55" letter-spacing="6">GALLERY 6</text>
+</svg>
